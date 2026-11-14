@@ -27,9 +27,14 @@ services:
     build:
       context: ./api
     environment:
-      # 单 API 进程内自建连接池，硬上限 2 条物理连接（见 app/db.py）
+      # 单 API 进程内自建连接池，硬上限 2 条物理连接（评估与快照构建共用，见 app/db.py）
       DB_DSN: "postgresql://app:app@db:5432/logistics"
       POOL_MAX_CONNECTIONS: "2"
+      # 快照导出：保留 10 分钟；构建超时与游标签名密钥
+      SNAPSHOT_TTL_SECONDS: "600"
+      SNAPSHOT_BUILD_TIMEOUT_SECONDS: "60"
+      SNAPSHOT_MAX_ACTIVE: "32"
+      SNAPSHOT_CURSOR_SECRET: "logistics-snapshot-cursor-v1"
       # 演示用：开启后可通过请求头 X-Demo-Pause-Seconds 在候选创建后暂停，便于断连演示
       DEMO_PAUSE_ENABLED: "true"
     ports:

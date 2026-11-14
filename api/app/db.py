@@ -72,7 +72,11 @@ class TwoConnectionPool:
             application_name="hypopg-eval-api",
         )
         self._total_created += 1
-        # 会话级只读 + 超时：即使校验被绕过，数据库也拒绝写入；慢查询有兜底
+        # 会话级只读 + 超时：即使校验被绕过，数据库也拒绝写入；慢查询有兜底。
+        # 注意：psycopg 的 "SET" 语句本身处于隐式事务中，随后的 ROLLBACK 会把
+        # SET 一起撤销；因此这里 SET 与 hypopg_reset 必须在同一事务里做完再 COMMIT，
+        # 设置才会真正成为会话级状态。hypopg_reset 放在 COMMIT 之前，保证它运行时
+        # 当前事务仍是可写的（只读默认值只影响其后新开的事务）。
         async with conn.cursor() as cur:
             await cur.execute(
                 psycopg.sql.SQL("SET statement_timeout = {}").format(
@@ -82,7 +86,6 @@ class TwoConnectionPool:
             await cur.execute("SET default_transaction_read_only = on")
             await cur.execute("SET lock_timeout = 2000")
             await cur.execute("SET idle_in_transaction_session_timeout = 60000")
-            await cur.execute("ROLLBACK")
             await cur.execute("SELECT hypopg_reset()")
             await cur.execute("COMMIT")
         return conn

@@ -1,6 +1,7 @@
 """请求/响应模型。"""
 from __future__ import annotations
 
+import datetime as _dt
 import re
 from typing import Any
 
@@ -9,6 +10,12 @@ from pydantic import BaseModel, Field, field_validator
 _IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")
 MAX_CANDIDATES = 3
 MAX_SQL_LENGTH = 20_000
+
+# 快照导出：单个窗口最多冻结 5000 条原始记录，每页最多 200 条。
+MAX_SNAPSHOT_ROWS = 5_000
+MAX_SNAPSHOT_PAGE_SIZE = 200
+DEFAULT_SNAPSHOT_PAGE_SIZE = 200
+MAX_EXPORT_KEY_LENGTH = 128
 
 
 class IndexCandidate(BaseModel):
@@ -92,3 +99,66 @@ class HealthResponse(BaseModel):
     status: str
     pool: dict[str, Any]
     db: dict[str, Any]
+    snapshots: dict[str, Any]
+
+
+# ---------------- 快照导出 ----------------
+
+
+class SnapshotCreateRequest(BaseModel):
+    """创建（或复用）一个冻结快照。"""
+
+    export_key: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_EXPORT_KEY_LENGTH,
+        description="客户端导出键：有效期内同键同参数复用同一快照，换参数返回冲突",
+    )
+    warehouse_id: int = Field(..., ge=1, description="仓号（正整数）")
+    business_date: _dt.date = Field(
+        ..., description="UTC 业务日（YYYY-MM-DD）；窗口为该日 18:00 至次日 06:00，左闭右开"
+    )
+    page_size: int = Field(
+        DEFAULT_SNAPSHOT_PAGE_SIZE,
+        ge=1,
+        le=MAX_SNAPSHOT_PAGE_SIZE,
+        description=f"每页条数，1~{MAX_SNAPSHOT_PAGE_SIZE}",
+    )
+
+    @field_validator("export_key")
+    @classmethod
+    def _validate_export_key(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("export_key 不能为空或纯空白")
+        if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in v):
+            raise ValueError("export_key 不能包含控制字符")
+        return v
+
+
+class SnapshotPageResponse(BaseModel):
+    snapshot_id: str = Field(..., description="快照号；后续翻页使用")
+    export_key: str
+    warehouse_id: int
+    business_date: _dt.date
+    window_start: _dt.datetime
+    window_end: _dt.datetime
+    created_at: _dt.datetime
+    expires_at: _dt.datetime
+    total_rows: int = Field(..., description="本次快照冻结的记录数（<= 5000）")
+    truncated: bool = Field(
+        ..., description="窗口内记录超过 5000 条时为 True，仅冻结前 5000 条"
+    )
+    page_size: int
+    offset: int = Field(..., description="本页第一条在快照中的下标（从 0 开始）")
+    returned_rows: int
+    has_more: bool
+    next_cursor: str | None = Field(
+        None, description="下一页游标；无下一页时为 null"
+    )
+    reused: bool = Field(
+        ..., description="本次是否复用了同键同参数的既有构建结果"
+    )
+    records: list[dict[str, Any]] = Field(
+        ..., description="按 scan_time、scan_id 升序排列的原始扫描记录"
+    )

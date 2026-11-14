@@ -12,6 +12,11 @@
 6. 基线不继承旧候选：连续两次请求，第二次的 before_baseline 仍为 0；
 7. 断连演示：候选创建后暂停期间断开 TCP，服务端完成清理后连接可复用；
 8. 物理连接上限：压力并发下 pg_stat_activity 中本应用连接数 <= 2。
+
+快照导出 API 的端到端断言见 tests/test_snapshot.py。
+
+运行：
+  python -I tests/test_api.py http://127.0.0.1:8000
 """
 from __future__ import annotations
 
